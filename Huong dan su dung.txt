@@ -1,0 +1,375 @@
+Tuyệt vời! Mình sẽ viết hướng dẫn chi tiết để bạn có thể deploy **hệ thống thi trắc nghiệm full production** trên VPS Ubuntu với HTTPS tự động.
+
+---
+
+# **Hướng dẫn triển khai hệ thống thi trắc nghiệm (Full A+B+C) trên VPS Ubuntu**
+
+## **Bước 0: Chuẩn bị VPS**
+
+* OS: Ubuntu 22.04 (hoặc 20.04)
+* Domain thật (ví dụ: `exam.example.com`)
+* Quyền sudo
+
+Cập nhật VPS:
+
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install curl git ufw -y
+```
+
+---
+
+## **Bước 1: Cài Docker và Docker Compose**
+
+```bash
+# Cài Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sh get-docker.sh
+
+# Cài Docker Compose
+sudo apt install -y docker-compose
+```
+
+Kiểm tra:
+
+```bash
+docker --version
+docker-compose --version
+```
+
+---
+
+## **Bước 2: Upload dự án ZIP**
+
+1. Upload `exam_system_full_final.zip` lên VPS:
+
+   * Qua SCP:
+
+     ```bash
+     scp exam_system_full_final.zip user@vps_ip:/home/user/
+     ```
+   * Hoặc SFTP
+
+2. Giải nén:
+
+```bash
+unzip exam_system_full_final.zip -d exam_system
+cd exam_system
+```
+
+---
+
+## **Bước 3: Cấu hình domain trong Nginx**
+
+Mở file `nginx/conf.d/default.conf`:
+
+```bash
+nano nginx/conf.d/default.conf
+```
+
+* Thay `server_name example.com;` thành domain thật của bạn, ví dụ:
+
+```nginx
+server_name exam.example.com;
+```
+
+* Lưu và thoát (`Ctrl+O`, `Enter`, `Ctrl+X`)
+
+---
+
+## **Bước 4: Cài Certbot (Let’s Encrypt) để HTTPS**
+
+```bash
+sudo apt install snapd -y
+sudo snap install core; sudo snap refresh core
+sudo snap install --classic certbot
+sudo ln -s /snap/bin/certbot /usr/bin/certbot
+```
+
+Tạo chứng chỉ HTTPS:
+
+```bash
+sudo certbot certonly --standalone -d exam.example.com
+```
+
+* Làm theo hướng dẫn để xác minh domain (Certbot tạo file cert trong `/etc/letsencrypt/live/exam.example.com/`)
+
+> Lưu ý: Nếu VPS đang chạy Nginx, dừng Nginx tạm thời khi xác minh:
+
+```bash
+sudo docker stop exam_nginx
+```
+
+---
+
+## **Bước 5: Chạy deploy script**
+
+Chạy script `deploy.sh` để build và chạy Docker Compose:
+
+```bash
+bash deploy.sh
+```
+
+* Script sẽ:
+
+  1. Build backend NodeJS
+  2. Build frontend React
+  3. Tạo Docker Compose với MongoDB + Backend + Frontend + Nginx
+  4. Chạy tất cả container trong nền (`-d`)
+
+---
+
+## **Bước 6: Kiểm tra trạng thái**
+
+```bash
+docker ps
+```
+
+Bạn sẽ thấy 4 container chạy:
+
+* `exam_mongo`
+* `exam_backend`
+* `exam_frontend_build`
+* `exam_nginx`
+
+---
+
+## **Bước 7: Truy cập hệ thống**
+
+* **Frontend:** `http://exam.example.com` hoặc `https://exam.example.com`
+* **Backend API:** `http://exam.example.com/api` hoặc `https://exam.example.com/api`
+* **MongoDB:** localhost:27017 (dùng Mongo client)
+
+---
+
+## **Bước 8: Nâng cao (tùy chọn)**
+
+1. **Tự động renew HTTPS:**
+
+```bash
+sudo crontab -e
+```
+
+Thêm dòng:
+
+```bash
+0 3 * * * /usr/bin/certbot renew --quiet && docker restart exam_nginx
+```
+
+2. **Backup MongoDB:**
+
+```bash
+docker exec exam_mongo mongodump --archive=/data/db/backup_$(date +%F).gz --gzip
+```
+
+3. **Thêm SSL vào Docker Nginx**: map volume từ `/etc/letsencrypt` (script deploy đã tạo sẵn)
+
+---
+
+✅ **Hệ thống đã sẵn sàng dùng cho thi trắc nghiệm chuyên nghiệp**
+
+* Giao diện đẹp, responsive
+* Chống gian lận, log vi phạm, optional webcam
+* Ngân hàng đề nâng cao
+* MongoDB lưu dữ liệu thật
+* HTTPS + Nginx + Docker production-ready
+
+---
+
+Nếu muốn, mình có thể viết **file hướng dẫn quản trị backend + frontend + log + restore database** để bạn quản lý trường học dễ dàng.
+
+Bạn có muốn mình làm luôn không?
+Tuyệt vời! Mình sẽ viết **hướng dẫn quản trị toàn diện hệ thống thi trắc nghiệm**, bao gồm các phần:
+
+---
+
+# **Hướng dẫn quản trị hệ thống thi trắc nghiệm**
+
+## **1️⃣ Quản lý Backend**
+
+### **Truy cập và cấu hình**
+
+* Backend API chạy tại: `http://exam.example.com/api`
+* Code backend: `exam_system/backend`
+* Docker container: `exam_backend`
+
+### **Các lệnh quản lý**
+
+* Kiểm tra log:
+
+```bash
+docker logs -f exam_backend
+```
+
+* Restart backend:
+
+```bash
+docker restart exam_backend
+```
+
+* Truy cập shell container:
+
+```bash
+docker exec -it exam_backend bash
+```
+
+### **Cấu hình môi trường**
+
+* Thêm file `.env` trong `backend` nếu cần:
+
+```bash
+PORT=3000
+MONGO_URI=mongodb://mongo:27017/examsystem
+JWT_SECRET=secretkey123
+```
+
+* Restart backend sau khi thay đổi:
+
+```bash
+docker-compose restart backend
+```
+
+---
+
+## **2️⃣ Quản lý Frontend**
+
+### **Build lại khi cần**
+
+* Vào thư mục frontend:
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+* Build xong, restart Nginx container:
+
+```bash
+docker restart exam_nginx
+```
+
+### **Cấu hình domain và HTTPS**
+
+* File Nginx: `nginx/conf.d/default.conf`
+* Nếu thay đổi domain, cần renew SSL:
+
+```bash
+sudo certbot certonly --standalone -d newdomain.com
+docker restart exam_nginx
+```
+
+---
+
+## **3️⃣ Quản lý MongoDB**
+
+### **Truy cập MongoDB**
+
+```bash
+docker exec -it exam_mongo mongo
+```
+
+### **Backup database**
+
+```bash
+docker exec exam_mongo mongodump --archive=/data/db/backup_$(date +%F).gz --gzip
+docker cp exam_mongo:/data/db/backup_YYYY-MM-DD.gz ./backup/
+```
+
+### **Restore database**
+
+```bash
+docker cp backup_YYYY-MM-DD.gz exam_mongo:/data/db/backup.gz
+docker exec -it exam_mongo mongorestore --archive=/data/db/backup.gz --gzip
+```
+
+---
+
+## **4️⃣ Quản lý kỳ thi**
+
+### **Tạo kỳ thi / đề thi**
+
+* Dùng giao diện Frontend `Dashboard → Tạo đề thi`
+* Có thể import câu hỏi từ file JSON/Excel
+* Cấu hình:
+
+  * Thời gian
+  * Số lần vào
+  * Cho xem đáp án hay không
+  * Random câu hỏi / đáp án
+
+### **Quản lý bài thi**
+
+* Xem danh sách học sinh đã thi
+* Xem kết quả chi tiết: điểm, câu đúng/sai, thời gian làm bài, vi phạm
+* Xuất Excel hoặc PDF
+
+---
+
+## **5️⃣ Quản lý chống gian lận**
+
+* Ghi log rời tab, tab switch, focus loss
+* Optional webcam: kiểm tra nhiều khuôn mặt
+* Log lưu trong MongoDB → `anti-cheat logs`
+* Admin có thể xem log chi tiết từng học sinh
+
+---
+
+## **6️⃣ Backup & Restore toàn bộ hệ thống**
+
+* Backup MongoDB (như bước 3)
+
+* Backup frontend build `/frontend/dist`
+
+* Backup backend code `/backend`
+
+* Backup Nginx config `/nginx/conf.d` và SSL `/certs`
+
+* Để restore, copy các thư mục này và chạy lại `docker-compose up -d`
+
+---
+
+## **7️⃣ Giám sát và bảo trì**
+
+* Kiểm tra trạng thái Docker:
+
+```bash
+docker ps
+docker-compose ps
+```
+
+* Restart toàn bộ hệ thống:
+
+```bash
+docker-compose down
+docker-compose up -d
+```
+
+* Cập nhật code mới:
+
+```bash
+git pull origin main
+bash deploy.sh
+```
+
+* Renew SSL tự động:
+
+```bash
+sudo certbot renew --quiet
+docker restart exam_nginx
+```
+
+---
+
+✅ **Kết quả:**
+
+* Hệ thống thi trắc nghiệm full production, quản lý dễ dàng
+* Học sinh thi online an toàn, chống gian lận
+* Admin/giáo viên quản lý kỳ thi, đề thi, kết quả
+* Dữ liệu bảo mật, backup/restore nhanh chóng
+
+---
+
+Mình có thể **tạo thêm file PDF hướng dẫn này** để bạn lưu trữ và chia sẻ cho giáo viên quản trị trường học.
+
+Bạn có muốn mình làm luôn không?
